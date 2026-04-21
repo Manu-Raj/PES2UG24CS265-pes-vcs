@@ -16,6 +16,7 @@
 // TODO functions:     index_load, index_save, index_add
 
 #include "index.h"
+#include "object.h"   // ✅ FIX: needed for object_write
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,7 +79,8 @@ int index_status(const Index *index) {
             unstaged_count++;
         } else {
             // Fast diff: check metadata instead of re-hashing file content
-            if (st.st_mtime != (time_t)index->entries[i].mtime_sec || st.st_size != (off_t)index->entries[i].size) {
+            if (st.st_mtime != (time_t)index->entries[i].mtime_sec ||
+                st.st_size != (off_t)index->entries[i].size) {
                 printf("  modified:   %s\n", index->entries[i].path);
                 unstaged_count++;
             }
@@ -96,22 +98,22 @@ int index_status(const Index *index) {
             // Skip hidden directories, parent directories, and build artifacts
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             if (strcmp(ent->d_name, ".pes") == 0) continue;
-            if (strcmp(ent->d_name, "pes") == 0) continue; // compiled executable
-            if (strstr(ent->d_name, ".o") != NULL) continue; // object files
+            if (strcmp(ent->d_name, "pes") == 0) continue;
+            if (strstr(ent->d_name, ".o") != NULL) continue;
 
             // Check if file is tracked in the index
             int is_tracked = 0;
             for (int i = 0; i < index->count; i++) {
                 if (strcmp(index->entries[i].path, ent->d_name) == 0) {
-                    is_tracked = 1; 
+                    is_tracked = 1;
                     break;
                 }
             }
-            
+
             if (!is_tracked) {
                 struct stat st;
                 stat(ent->d_name, &st);
-                if (S_ISREG(st.st_mode)) { // Only list regular files for simplicity
+                if (S_ISREG(st.st_mode)) {// Only list regular files for simplicity
                     printf("  untracked:  %s\n", ent->d_name);
                     untracked_count++;
                 }
@@ -138,13 +140,11 @@ int index_load(Index *index) {
     index->count = 0;
 
     FILE *fp = fopen(INDEX_FILE, "r");
-    if (!fp) {
-        return 0; // no index yet → empty
-    }
+    if (!fp) return 0;
 
     while (index->count < MAX_INDEX_ENTRIES) {
         IndexEntry *e = &index->entries[index->count];
-
+   
         char hash_hex[HASH_HEX_SIZE + 1];
 
         int ret = fscanf(fp, "%o %64s %lu %u %s",
@@ -221,6 +221,11 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
+
+    // ✅ FIX: load existing index
+    if (index_load(index) < 0)
+        return -1;
+
     FILE *fp = fopen(path, "rb");
     if (!fp) return -1;
 
@@ -234,7 +239,13 @@ int index_add(Index *index, const char *path) {
         return -1;
     }
 
-    fread(data, 1, size, fp);
+    // ✅ FIX: safe fread
+    if (fread(data, 1, size, fp) != size) {
+        free(data);
+        fclose(fp);
+        return -1;
+    }
+
     fclose(fp);
 
     ObjectID hash;
@@ -254,7 +265,9 @@ int index_add(Index *index, const char *path) {
         e = &index->entries[index->count++];
     }
 
-    e->mode = st.st_mode;
+    // ✅ FIX: normalized mode
+    e->mode = 0100644;
+
     e->hash = hash;
     e->mtime_sec = st.st_mtime;
     e->size = st.st_size;
