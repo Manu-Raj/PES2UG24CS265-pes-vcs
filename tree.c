@@ -190,8 +190,36 @@ static int build_tree(char **paths, ObjectID *hashes, uint32_t *modes, int count
 
 // Returns 0 on success, -1 on error.
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    Index idx;
+
+    if (index_load(&idx) < 0)
+        return -1;
+
+    if (idx.count == 0)
+        return -1;
+
+    char *paths[1024];
+    ObjectID hashes[1024];
+    uint32_t modes[1024];
+
+    for (int i = 0; i < idx.count; i++) {
+        paths[i] = idx.entries[i].path;
+        hashes[i] = idx.entries[i].hash;
+        modes[i] = idx.entries[i].mode;
+    }
+
+    // Sort paths for deterministic output
+    for (int i = 0; i < idx.count - 1; i++) {
+        for (int j = i + 1; j < idx.count; j++) {
+            if (strcmp(paths[i], paths[j]) > 0) {
+                char *tmp_p = paths[i]; paths[i] = paths[j]; paths[j] = tmp_p;
+
+                ObjectID tmp_h = hashes[i]; hashes[i] = hashes[j]; hashes[j] = tmp_h;
+
+                uint32_t tmp_m = modes[i]; modes[i] = modes[j]; modes[j] = tmp_m;
+            }
+        }
+    }
+
+    return build_tree(paths, hashes, modes, idx.count, id_out);
 }
